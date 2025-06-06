@@ -1,0 +1,146 @@
+# Directory: machine_teaching_mart/algorithms/run_demo.py
+
+import numpy as np
+from teaching_engine import MultiAgentTeachingEnv
+from teaching_policy import TeachingPolicy
+from learners import StudentPolicy
+from utils.math_utils import bayesian_update, em_algorithm
+from utils.graph_utils import generate_agent_graph
+import matplotlib.pyplot as plt
+
+# Initialize agent environment and topological graph
+num_agents = 5
+agent_graph = generate_agent_graph(num_agents=num_agents)
+env = MultiAgentTeachingEnv(agent_graph=agent_graph)
+
+# Initialize teaching and student policies
+teacher = TeachingPolicy(num_agents=num_agents)
+students = [StudentPolicy(agent_id=i) for i in range(num_agents)]
+
+# Run simulation
+num_episodes = 100
+rewards = []
+for ep in range(num_episodes):
+    obs = env.reset()
+    ep_reward = 0
+    for t in range(20):
+        teaching_signals = teacher.generate_signals(obs)
+        student_actions = [students[i].act(obs[i], teaching_signals[i]) for i in range(num_agents)]
+        next_obs, reward, done, _ = env.step(student_actions)
+        teacher.update(obs, student_actions, reward)
+        for i in range(num_agents):
+            students[i].learn(obs[i], student_actions[i], reward[i])
+        obs = next_obs
+        ep_reward += np.mean(reward)
+    rewards.append(ep_reward)
+    print(f"Episode {ep} | Mean Reward: {ep_reward:.2f}")
+
+# Visualization
+plt.plot(rewards)
+plt.title("Learning Curve under Machine Teaching")
+plt.xlabel("Episode")
+plt.ylabel("Average Reward")
+plt.grid(True)
+plt.savefig("../visualizations/reward_curve.png")
+plt.show()
+
+# Optional: Save logs
+np.save("../data/episode_rewards.npy", rewards)
+
+
+# Directory: machine_teaching_mart/algorithms/teaching_engine.py
+
+import numpy as np
+
+class MultiAgentTeachingEnv:
+    def __init__(self, agent_graph):
+        self.graph = agent_graph
+        self.num_agents = len(agent_graph)
+        self.state = None
+
+    def reset(self):
+        self.state = np.random.randn(self.num_agents, 3)
+        return self.state
+
+    def step(self, actions):
+        noise = np.random.normal(0, 0.1, self.state.shape)
+        self.state = self.state + 0.05 * np.array(actions) + noise
+        reward = -np.linalg.norm(self.state, axis=1)
+        done = False
+        return self.state, reward, done, {}
+
+
+# Directory: machine_teaching_mart/algorithms/teaching_policy.py
+
+import numpy as np
+
+class TeachingPolicy:
+    def __init__(self, num_agents):
+        self.num_agents = num_agents
+        self.teaching_weights = np.random.randn(num_agents, 3)
+
+    def generate_signals(self, observations):
+        return np.dot(observations, self.teaching_weights.T)
+
+    def update(self, obs, actions, rewards):
+        gradient = np.outer(rewards, np.mean(obs, axis=0))
+        self.teaching_weights += 0.01 * gradient
+
+
+# Directory: machine_teaching_mart/algorithms/learners.py
+
+import numpy as np
+
+class StudentPolicy:
+    def __init__(self, agent_id):
+        self.agent_id = agent_id
+        self.weights = np.random.randn(3)
+
+    def act(self, observation, teaching_signal):
+        return observation + teaching_signal + self.weights
+
+    def learn(self, obs, action, reward):
+        self.weights += 0.01 * reward * obs
+
+
+# Directory: machine_teaching_mart/utils/math_utils.py
+
+import numpy as np
+
+def bayesian_update(prior, likelihood):
+    posterior = prior * likelihood
+    return posterior / np.sum(posterior)
+
+def em_algorithm(data, num_iters=10):
+    mean = np.mean(data)
+    for _ in range(num_iters):
+        responsibilities = 1 / (1 + np.exp(-(data - mean)))
+        mean = np.sum(responsibilities * data) / np.sum(responsibilities)
+    return mean
+
+
+# Directory: machine_teaching_mart/utils/graph_utils.py
+
+import networkx as nx
+import numpy as np
+
+def generate_agent_graph(num_agents):
+    G = nx.erdos_renyi_graph(num_agents, 0.6)
+    adjacency = nx.to_numpy_array(G)
+    return adjacency
+
+
+# Directory: machine_teaching_mart/visualizations/plot_dynamics.py
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+rewards = np.load("../data/episode_rewards.npy")
+plt.plot(rewards, label="Mean Episode Reward")
+plt.title("Reward Dynamics in Multi-Agent Reinforcement Teaching")
+plt.xlabel("Episode")
+plt.ylabel("Reward")
+plt.legend()
+plt.grid(True)
+plt.savefig("reward_dynamics_plot.png")
+plt.show()
